@@ -1,0 +1,38 @@
+option('commoncrypto', type: 'feature', value: 'auto',
+       description: 'Enable use of CommonCrypto')
+
+option('gnutls', type: 'feature', value: 'auto',
+      description: 'Enable use of GnuTLS and Nettle')
+
+option('mbedtls', type: 'feature', value: 'auto',
+       description: 'Enable use of mbed TLS')
+
+option('openssl', type: 'feature', value: 'auto',
+       description: 'Enable use of OpenSSL')
+
+option('windows_crypto', type: 'feature', value: 'auto',
+       description: 'Enable use of Windows cryptography libraries')
+
+option('bzip2', type: 'feature', value: 'auto',
+       description: 'Enable use of BZip2')
+
+option('lzma', type: 'feature', value: 'auto',
+       description: 'Enable use of LZMA')
+
+option('zstd', type: 'feature', value: 'auto',
+       description: 'Enable use of Zstandard')
+
+option('windows_uwp', type: 'boolean', value: false,
+       description: 'Enable use of WindowPhone or WindowsStore platform')
+
+option('tools', type: 'feature', value: 'auto',
+       description: 'Build tools in the src directory (zipcmp, zipmerge, ziptool)')
+
+option('regress', type: 'feature', value: 'auto',
+       description: 'Build regression tests (needs tools)')
+
+option('ossfuzz', type: 'feature', value: 'auto',
+       description: 'Build fuzzers for ossfuzz')
+
+option('fdopen', type: 'boolean', value: true,
+       description: 'Enable zip_fdopen, which is not allowed in Microsoft CRT secure libraries')
