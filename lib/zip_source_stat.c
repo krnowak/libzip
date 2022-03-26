@@ -54,7 +54,7 @@ zip_source_stat(zip_source_t *src, zip_stat_t *st) {
         }
     }
 
-    if (_zip_source_call(src, st, sizeof(*st), ZIP_SOURCE_STAT) < 0) {
+    if (_zip_source_call(src, -1, st, sizeof(*st), ZIP_SOURCE_STAT) < 0) {
         return -1;
     }
 

@@ -37,25 +37,33 @@
 
 #include "zipint.h"
 
+struct window_stream {
+    zip_uint64_t offset; /* offset in src for next read */
+};
+
+typedef struct window_stream window_stream_t;
+
 struct window {
     zip_uint64_t start; /* where in file we start reading */
     zip_uint64_t end;   /* where in file we stop reading */
     bool end_valid;     /* whether end is set, otherwise read until EOF */
 
-    /* if not NULL, read file data for this file */
-    zip_t *source_archive;
-    zip_uint64_t source_index;
-
-    zip_uint64_t offset; /* offset in src for next read */
+    window_stream_t stream;
 
     zip_stat_t stat;
     zip_file_attributes_t attributes;
     zip_error_t error;
     zip_int64_t supports;
     bool needs_seek;
+    bool needs_stream_seek;
 };
 
-static zip_int64_t window_read(zip_source_t *, void *, void *, zip_uint64_t, zip_source_cmd_t);
+static zip_int64_t window_read(zip_source_t *, zip_int64_t, void *, void *, zip_uint64_t, zip_source_cmd_t);
+static bool _needs_seek(struct window *ctx, zip_int64_t stream_id);
+static zip_int64_t window_read_open(zip_source_t *src, zip_int64_t stream_id, struct window *ctx, window_stream_t *stream);
+static zip_int64_t window_read_read(zip_source_t *src, zip_int64_t stream_id, struct window *ctx, window_stream_t *stream, void *data, zip_uint64_t len);
+static zip_int64_t window_read_seek(zip_source_t *src, zip_int64_t stream_id, struct window *ctx, window_stream_t *stream, void *data, zip_uint64_t len);
+static zip_int64_t window_read_tell(struct window *ctx, window_stream_t *stream);
 
 
 ZIP_EXTERN zip_source_t *
@@ -63,19 +71,31 @@ zip_source_window_create(zip_source_t *src, zip_uint64_t start, zip_int64_t len,
     return _zip_source_window_new(src, start, len, NULL, 0, NULL, 0, error);
 }
 
-
 zip_source_t *
 _zip_source_window_new(zip_source_t *src, zip_uint64_t start, zip_int64_t length, zip_stat_t *st, zip_file_attributes_t *attributes, zip_t *source_archive, zip_uint64_t source_index, zip_error_t *error) {
     struct window *ctx;
+    zip_uint64_t offset;
 
     if (src == NULL || length < -1 || (source_archive == NULL && source_index != 0)) {
         zip_error_set(error, ZIP_ER_INVAL, 0);
         return NULL;
     }
-    
+
     if (length >= 0) {
         if (start + (zip_uint64_t)length < start) {
             zip_error_set(error, ZIP_ER_INVAL, 0);
+            return NULL;
+        }
+    }
+
+    offset = 0;
+    if (source_archive) {
+        if ((offset = _zip_file_get_offset(source_archive, source_index, error)) == 0) {
+            return NULL;
+        }
+        if (length >= 0 && start + length + offset < start + length) {
+            /* zip archive data claims end of data past zip64 limits */
+            zip_error_set(error, ZIP_ER_INCONS, MAKE_DETAIL_WITH_INDEX(ZIP_ER_DETAIL_CDIR_ENTRY_INVALID, source_index));
             return NULL;
         }
     }
@@ -85,12 +105,12 @@ _zip_source_window_new(zip_source_t *src, zip_uint64_t start, zip_int64_t length
         return NULL;
     }
 
-    ctx->start = start;
+    ctx->start = start + offset;
     if (length == -1) {
         ctx->end_valid = false;
     }
     else {
-        ctx->end = start + (zip_uint64_t)length;
+        ctx->end = start + offset + (zip_uint64_t)length;
         ctx->end_valid = true;
     }
     zip_stat_init(&ctx->stat);
@@ -100,11 +120,17 @@ _zip_source_window_new(zip_source_t *src, zip_uint64_t start, zip_int64_t length
     else {
         zip_file_attributes_init(&ctx->attributes);
     }
-    ctx->source_archive = source_archive;
-    ctx->source_index = source_index;
     zip_error_init(&ctx->error);
     ctx->supports = (zip_source_supports(src) & (ZIP_SOURCE_SUPPORTS_SEEKABLE | ZIP_SOURCE_SUPPORTS_REOPEN)) | (zip_source_make_command_bitmap(ZIP_SOURCE_GET_FILE_ATTRIBUTES, ZIP_SOURCE_SUPPORTS, ZIP_SOURCE_TELL, -1));
     ctx->needs_seek = (ctx->supports & ZIP_SOURCE_MAKE_COMMAND_BITMASK(ZIP_SOURCE_SEEK)) ? true : false;
+    if (zip_source_supports_multi_open_seekable(src)) {
+        ctx->supports |= ZIP_SOURCE_SUPPORTS_SEEKABLE_STREAMS;
+        ctx->needs_stream_seek = true;
+    } else {
+        if (zip_source_supports_multi_open_readable(src))
+            ctx->supports |= ZIP_SOURCE_SUPPORTS_READABLE_STREAMS;
+        ctx->needs_stream_seek = false;
+    }
 
     if (st) {
         if (_zip_stat_merge(&ctx->stat, st, error) < 0) {
@@ -134,9 +160,8 @@ _zip_source_invalidate(zip_source_t *src) {
     }
 }
 
-
 static zip_int64_t
-window_read(zip_source_t *src, void *_ctx, void *data, zip_uint64_t len, zip_source_cmd_t cmd) {
+window_read(zip_source_t *src, zip_int64_t stream_id, void *_ctx, void *data, zip_uint64_t len, zip_source_cmd_t cmd) {
     struct window *ctx;
     zip_int64_t ret;
     zip_uint64_t n, i;
@@ -155,119 +180,13 @@ window_read(zip_source_t *src, void *_ctx, void *data, zip_uint64_t len, zip_sou
         return 0;
 
     case ZIP_SOURCE_OPEN:
-        if (ctx->source_archive) {
-            zip_uint64_t offset;
-
-            if ((offset = _zip_file_get_offset(ctx->source_archive, ctx->source_index, &ctx->error)) == 0) {
-                return -1;
-            }
-            if (ctx->end + offset < ctx->end) {
-                /* zip archive data claims end of data past zip64 limits */
-                zip_error_set(&ctx->error, ZIP_ER_INCONS, MAKE_DETAIL_WITH_INDEX(ZIP_ER_DETAIL_CDIR_ENTRY_INVALID, ctx->source_index));
-                return -1;
-            }
-            ctx->start += offset;
-            ctx->end += offset;
-            ctx->source_archive = NULL;
-        }
-
-        if (!ctx->needs_seek) {
-            DEFINE_BYTE_ARRAY(b, BUFSIZE);
-
-            if (!byte_array_init(b, BUFSIZE)) {
-                zip_error_set(&ctx->error, ZIP_ER_MEMORY, 0);
-                return -1;
-            }
-
-            for (n = 0; n < ctx->start; n += (zip_uint64_t)ret) {
-                i = (ctx->start - n > BUFSIZE ? BUFSIZE : ctx->start - n);
-                if ((ret = zip_source_read(src, b, i)) < 0) {
-                    _zip_error_set_from_source(&ctx->error, src);
-                    byte_array_fini(b);
-                    return -1;
-                }
-                if (ret == 0) {
-                    zip_error_set(&ctx->error, ZIP_ER_EOF, 0);
-                    byte_array_fini(b);
-                    return -1;
-                }
-            }
-
-            byte_array_fini(b);
-        }
-
-        ctx->offset = ctx->start;
-        return 0;
+        return window_read_open(src, -1, ctx, &ctx->stream);
 
     case ZIP_SOURCE_READ:
-        if (ctx->end_valid && len > ctx->end - ctx->offset) {
-            len = ctx->end - ctx->offset;
-        }
+        return window_read_read(src, -1, ctx, &ctx->stream, data, len);
 
-        if (len == 0) {
-            return 0;
-        }
-
-        if (ctx->needs_seek) {
-            if (zip_source_seek(src, (zip_int64_t)ctx->offset, SEEK_SET) < 0) {
-                _zip_error_set_from_source(&ctx->error, src);
-                return -1;
-            }
-        }
-
-        if ((ret = zip_source_read(src, data, len)) < 0) {
-            zip_error_set(&ctx->error, ZIP_ER_EOF, 0);
-            return -1;
-        }
-
-        ctx->offset += (zip_uint64_t)ret;
-
-        if (ret == 0) {
-            if (ctx->end_valid && ctx->offset < ctx->end) {
-                zip_error_set(&ctx->error, ZIP_ER_EOF, 0);
-                return -1;
-            }
-        }
-        return ret;
-
-    case ZIP_SOURCE_SEEK: {
-        zip_int64_t new_offset;
-        
-        if (!ctx->end_valid) {
-            zip_source_args_seek_t *args = ZIP_SOURCE_GET_ARGS(zip_source_args_seek_t, data, len, &ctx->error);
-            
-            if (args == NULL) {
-                return -1;
-            }
-            if (args->whence == SEEK_END) {
-                if (zip_source_seek(src, args->offset, args->whence) < 0) {
-                    _zip_error_set_from_source(&ctx->error, src);
-                    return -1;
-                }
-                new_offset = zip_source_tell(src);
-                if (new_offset < 0) {
-                    _zip_error_set_from_source(&ctx->error, src);
-                    return -1;
-                }
-                if ((zip_uint64_t)new_offset < ctx->start) {
-                    zip_error_set(&ctx->error, ZIP_ER_INVAL, 0);
-                    (void)zip_source_seek(src, (zip_int64_t)ctx->offset, SEEK_SET);
-                    return -1;
-                }
-                ctx->offset = (zip_uint64_t)new_offset;
-                return 0;
-            }
-        }
-
-        new_offset = zip_source_seek_compute_offset(ctx->offset - ctx->start, ctx->end - ctx->start, data, len, &ctx->error);
-        
-        if (new_offset < 0) {
-            return -1;
-        }
-        
-        ctx->offset = (zip_uint64_t)new_offset + ctx->start;
-        return 0;
-    }
+    case ZIP_SOURCE_SEEK:
+        return window_read_seek(src, -1, ctx, &ctx->stream, data, len);
 
     case ZIP_SOURCE_STAT: {
         zip_stat_t *st;
@@ -293,7 +212,77 @@ window_read(zip_source_t *src, void *_ctx, void *data, zip_uint64_t len, zip_sou
         return ctx->supports;
 
     case ZIP_SOURCE_TELL:
-        return (zip_int64_t)(ctx->offset - ctx->start);
+        return window_read_tell(ctx, &ctx->stream);
+
+    case ZIP_SOURCE_OPEN_STREAM: {
+        zip_source_args_stream_t *args;
+        window_stream_t *stream;
+
+        args = ZIP_SOURCE_GET_ARGS(zip_source_args_stream_t, data, len, &ctx->error);
+        if (args == NULL)
+            return -1;
+
+        stream = (window_stream_t *)malloc(sizeof(*stream));
+        if (!stream) {
+            zip_error_set(&ctx->error, ZIP_ER_MEMORY, 0);
+            return -1;
+        }
+        if (window_read_open(src, stream_id, ctx, stream) < 0) {
+            free(stream);
+            return -1;
+        }
+        args->user_stream = stream;
+        return 0;
+    }
+
+    case ZIP_SOURCE_CLOSE_STREAM: {
+        zip_source_args_stream_t *args;
+
+        args = ZIP_SOURCE_GET_ARGS(zip_source_args_stream_t, data, len, &ctx->error);
+        if (args == NULL)
+            return -1;
+
+        free(args->user_stream);
+        return 0;
+    }
+
+    case ZIP_SOURCE_READ_STREAM: {
+        zip_source_args_stream_t *args;
+        window_stream_t *stream;
+
+        args = ZIP_SOURCE_GET_ARGS(zip_source_args_stream_t, data, len, &ctx->error);
+        if (args == NULL)
+            return -1;
+
+        stream = (window_stream_t *)args->user_stream;
+
+        return window_read_read(src, stream_id, ctx, stream, data, len);
+    }
+
+    case ZIP_SOURCE_SEEK_STREAM: {
+        zip_source_args_stream_t *args;
+        window_stream_t *stream;
+
+        args = ZIP_SOURCE_GET_ARGS(zip_source_args_stream_t, data, len, &ctx->error);
+        if (args == NULL)
+            return -1;
+
+        stream = (window_stream_t *)args->user_stream;
+
+        return window_read_seek(src, stream_id, ctx, stream, data, len);
+    }
+
+    case ZIP_SOURCE_TELL_STREAM: {
+        zip_source_args_stream_t *args;
+        window_stream_t *stream;
+
+        args = ZIP_SOURCE_GET_ARGS(zip_source_args_stream_t, data, len, &ctx->error);
+        if (args == NULL)
+            return -1;
+
+        stream = (window_stream_t *)args->user_stream;
+        return window_read_tell(ctx, stream);
+    }
 
     default:
         zip_error_set(&ctx->error, ZIP_ER_OPNOTSUPP, 0);
@@ -335,4 +324,127 @@ _zip_register_source(zip_t *za, zip_source_t *src) {
     za->open_source[za->nopen_source++] = src;
 
     return 0;
+}
+
+static bool
+_needs_seek(struct window *ctx, zip_int64_t stream_id) {
+  if (stream_id < 0)
+      return ctx->needs_seek;
+
+  return ctx->needs_stream_seek;
+}
+
+static zip_int64_t
+window_read_open(zip_source_t *src, zip_int64_t stream_id, struct window *ctx, window_stream_t *stream) {
+    if (!_needs_seek(ctx, stream_id)) {
+        DEFINE_BYTE_ARRAY(b, BUFSIZE);
+        zip_uint64_t n, i;
+        zip_int64_t ret;
+
+        if (!byte_array_init(b, BUFSIZE)) {
+            zip_error_set(&ctx->error, ZIP_ER_MEMORY, 0);
+            return -1;
+        }
+
+        for (n = 0; n < ctx->start; n += (zip_uint64_t)ret) {
+            i = (ctx->start - n > BUFSIZE ? BUFSIZE : ctx->start - n);
+            ret = _zip_source_read(src, stream_id, b, i);
+
+            if (ret < 0) {
+                _zip_error_set_from_source(&ctx->error, src);
+                byte_array_fini(b);
+                return -1;
+            }
+            if (ret == 0) {
+                zip_error_set(&ctx->error, ZIP_ER_EOF, 0);
+                byte_array_fini(b);
+                return -1;
+            }
+        }
+
+        byte_array_fini(b);
+    }
+
+    stream->offset = ctx->start;
+    return 0;
+}
+
+static zip_int64_t
+window_read_read(zip_source_t *src, zip_int64_t stream_id, struct window *ctx, window_stream_t *stream, void *data, zip_uint64_t len) {
+    zip_int64_t ret;
+
+    if (ctx->end_valid && len > ctx->end - stream->offset) {
+        len = ctx->end - stream->offset;
+    }
+
+    if (len == 0) {
+        return 0;
+    }
+
+    if (_needs_seek(ctx, stream_id)) {
+        if (_zip_source_seek(src, stream_id, (zip_int64_t)stream->offset, SEEK_SET) < 0) {
+            _zip_error_set_from_source(&ctx->error, src);
+            return -1;
+        }
+    }
+
+    if ((ret = _zip_source_read(src, stream_id, data, len)) < 0) {
+        zip_error_set(&ctx->error, ZIP_ER_EOF, 0);
+        return -1;
+    }
+
+    stream->offset += (zip_uint64_t)ret;
+
+    if (ret == 0) {
+        if (ctx->end_valid && stream->offset < ctx->end) {
+            zip_error_set(&ctx->error, ZIP_ER_EOF, 0);
+            return -1;
+        }
+    }
+    return ret;
+}
+
+static zip_int64_t
+window_read_seek(zip_source_t *src, zip_int64_t stream_id, struct window *ctx, window_stream_t *stream, void *data, zip_uint64_t len) {
+    zip_int64_t new_offset;
+
+    if (!ctx->end_valid) {
+        zip_source_args_seek_t *args = ZIP_SOURCE_GET_ARGS(zip_source_args_seek_t, data, len, &ctx->error);
+
+        if (args == NULL) {
+            return -1;
+        }
+        if (args->whence == SEEK_END) {
+            if (_zip_source_seek(src, stream_id, args->offset, args->whence) < 0) {
+                _zip_error_set_from_source(&ctx->error, src);
+                return -1;
+            }
+            new_offset = _zip_source_tell(src, stream_id);
+            if (new_offset < 0) {
+                _zip_error_set_from_source(&ctx->error, src);
+                return -1;
+            }
+            if ((zip_uint64_t)new_offset < ctx->start) {
+                zip_error_set(&ctx->error, ZIP_ER_INVAL, 0);
+                (void)_zip_source_seek(src, stream_id, (zip_int64_t)stream->offset, SEEK_SET);
+                return -1;
+            }
+            stream->offset = (zip_uint64_t)new_offset;
+            return 0;
+        }
+    }
+
+    new_offset = zip_source_seek_compute_offset(stream->offset - ctx->start, ctx->end - ctx->start, data, len, &ctx->error);
+
+    if (new_offset < 0) {
+        return -1;
+    }
+
+    stream->offset = (zip_uint64_t)new_offset + ctx->start;
+    return 0;
+}
+
+static zip_int64_t
+window_read_tell(struct window *ctx, window_stream_t *stream) {
+    return (zip_int64_t)(stream->offset - ctx->start);
 }

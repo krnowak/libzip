@@ -1,6 +1,6 @@
 /*
-  zip_source_write.c -- start a new file for writing
-  Copyright (C) 2014-2021 Dieter Baron and Thomas Klausner
+  zip_realloc.c -- reallocate with additional elements
+  Copyright (C) 2009-2022 Dieter Baron and Thomas Klausner
 
   This file is part of libzip, a library to manipulate ZIP archives.
   The authors can be contacted at <libzip@nih.at>
@@ -32,15 +32,37 @@
 */
 
 
+#include <stdlib.h>
+
 #include "zipint.h"
 
+int
+_zip_realloc(void **inout_memory, zip_uint64_t *inout_alloced, zip_uint64_t element_size, zip_uint64_t additional_elements) {
+    void *old_memory = *inout_memory;
+    zip_uint64_t old_alloced = *inout_alloced;
+    /* old size should not overflow - it's something we allocated before */
+    zip_uint64_t old_size = old_alloced * element_size;
+    zip_uint64_t new_alloced;
+    zip_uint64_t new_size;
+    void *new_memory;
 
-ZIP_EXTERN zip_int64_t
-zip_source_write(zip_source_t *src, const void *data, zip_uint64_t length) {
-    if (!ZIP_SOURCE_IS_OPEN_WRITING(src) || length > ZIP_INT64_MAX) {
-        zip_error_set(&src->error, ZIP_ER_INVAL, 0);
-        return -1;
-    }
+    if (additional_elements == 0)
+        additional_elements = 1;
 
-    return _zip_source_call(src, -1, (void *)data, length, ZIP_SOURCE_WRITE);
+    if (old_alloced > ZIP_UINT64_MAX - additional_elements)
+        return ZIP_ER_MEMORY;
+
+    new_alloced = old_alloced + additional_elements;
+
+    if (new_alloced > ZIP_UINT64_MAX / element_size)
+        return ZIP_ER_MEMORY;
+
+    new_size = new_alloced * element_size;
+
+    if ((new_memory = realloc(old_memory, new_size)) == NULL)
+        return ZIP_ER_MEMORY;
+
+    *inout_memory = new_memory;
+    *inout_alloced = new_alloced;
+    return ZIP_ER_OK;
 }

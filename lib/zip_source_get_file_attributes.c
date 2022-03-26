@@ -52,7 +52,7 @@ zip_source_get_file_attributes(zip_source_t *src, zip_file_attributes_t *attribu
     zip_file_attributes_init(attributes);
 
     if (src->supports & ZIP_SOURCE_MAKE_COMMAND_BITMASK(ZIP_SOURCE_GET_FILE_ATTRIBUTES)) {
-        if (_zip_source_call(src, attributes, sizeof(*attributes), ZIP_SOURCE_GET_FILE_ATTRIBUTES) < 0) {
+        if (_zip_source_call(src, -1, attributes, sizeof(*attributes), ZIP_SOURCE_GET_FILE_ATTRIBUTES) < 0) {
             return -1;
         }
     }

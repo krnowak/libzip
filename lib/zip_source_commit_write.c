@@ -52,7 +52,7 @@ zip_source_commit_write(zip_source_t *src) {
         }
     }
 
-    if (_zip_source_call(src, NULL, 0, ZIP_SOURCE_COMMIT_WRITE) < 0) {
+    if (_zip_source_call(src, -1, NULL, 0, ZIP_SOURCE_COMMIT_WRITE) < 0) {
         src->write_state = ZIP_SOURCE_WRITE_FAILED;
         return -1;
     }

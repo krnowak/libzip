@@ -1,0 +1,5 @@
+# various tests for zip_fread using streams
+program fread
+args -i broken.zip
+return 0
+file broken.zip broken.zip broken.zip

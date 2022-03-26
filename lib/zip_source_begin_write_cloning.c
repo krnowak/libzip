@@ -42,7 +42,7 @@ zip_source_begin_write_cloning(zip_source_t *src, zip_uint64_t offset) {
         return -1;
     }
 
-    if (_zip_source_call(src, NULL, offset, ZIP_SOURCE_BEGIN_WRITE_CLONING) < 0) {
+    if (_zip_source_call(src, -1, NULL, offset, ZIP_SOURCE_BEGIN_WRITE_CLONING) < 0) {
         return -1;
     }
 

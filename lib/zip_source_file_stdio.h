@@ -36,8 +36,8 @@
 
 #include <stdio.h>
 
-void _zip_stdio_op_close(zip_source_file_context_t *ctx);
-zip_int64_t _zip_stdio_op_read(zip_source_file_context_t *ctx, void *buf, zip_uint64_t len);
+void _zip_stdio_op_close(zip_source_file_context_t *ctx, void *f);
+zip_int64_t _zip_stdio_op_read(zip_source_file_context_t *ctx, void *buf, zip_uint64_t len, void *f);
 bool _zip_stdio_op_seek(zip_source_file_context_t *ctx, void *f, zip_int64_t offset, int whence);
 bool _zip_stdio_op_stat(zip_source_file_context_t *ctx, zip_source_file_stat_t *st);
 zip_int64_t _zip_stdio_op_tell(zip_source_file_context_t *ctx, void *f);

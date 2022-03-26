@@ -42,7 +42,7 @@ zip_fclose(zip_file_t *zf) {
     int ret;
 
     if (zf->src) {
-        zip_source_close(zf->src);
+        _zip_source_close(zf->src, zf->stream_id);
         zip_source_free(zf->src);
     }
 

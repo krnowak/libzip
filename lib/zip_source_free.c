@@ -61,7 +61,7 @@ zip_source_free(zip_source_t *src) {
         _zip_deregister_source(src->source_archive, src);
     }
 
-    (void)_zip_source_call(src, NULL, 0, ZIP_SOURCE_FREE);
+    (void)_zip_source_call(src, -1, NULL, 0, ZIP_SOURCE_FREE);
 
     if (src->src) {
         zip_source_free(src->src);

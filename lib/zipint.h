@@ -170,7 +170,7 @@ const zip_uint8_t *zip_get_extra_field_by_id(zip_t *, int, int, zip_uint16_t, in
    user-supplied compression/encryption implementation is finished.
    Thus we will keep it private for now. */
 
-typedef zip_int64_t (*zip_source_layered_callback)(zip_source_t *, void *, void *, zip_uint64_t, enum zip_source_cmd);
+typedef zip_int64_t (*zip_source_layered_callback)(zip_source_t *, zip_int64_t,void *, void *, zip_uint64_t, enum zip_source_cmd);
 zip_source_t *zip_source_compress(zip_t *za, zip_source_t *src, zip_int32_t cm, int compression_flags);
 zip_source_t *zip_source_crc_create(zip_source_t *, int, zip_error_t *error);
 zip_source_t *zip_source_decompress(zip_t *za, zip_source_t *src, zip_int32_t cm);
@@ -181,6 +181,8 @@ zip_source_t *zip_source_pkware_encode(zip_t *, zip_source_t *, zip_uint16_t, in
 int zip_source_remove(zip_source_t *);
 zip_int64_t zip_source_supports(zip_source_t *src);
 bool zip_source_supports_reopen(zip_source_t *src);
+bool zip_source_supports_multi_open_readable(zip_source_t *src);
+bool zip_source_supports_multi_open_seekable(zip_source_t *src);
 zip_source_t *zip_source_winzip_aes_decode(zip_t *, zip_source_t *, zip_uint16_t, int, const char *);
 zip_source_t *zip_source_winzip_aes_encode(zip_t *, zip_source_t *, zip_uint16_t, int, const char *);
 zip_source_t *zip_source_buffer_with_attributes(zip_t *za, const void *data, zip_uint64_t len, int freep, zip_file_attributes_t *attributes);
@@ -310,6 +312,7 @@ struct zip_file {
     zip_error_t error; /* error information */
     bool eof;
     zip_source_t *src; /* data source */
+    zip_int64_t stream_id;
 };
 
 /* zip archive directory entry (central or local) */
@@ -381,6 +384,16 @@ enum zip_source_write_state {
 };
 typedef enum zip_source_write_state zip_source_write_state_t;
 
+struct zip_stream {
+    zip_int64_t parent_stream_id;
+    bool eof;                /* EOF reached */
+    bool had_read_error;     /* a previous ZIP_SOURCE_READ reported an error */
+    zip_uint64_t bytes_read; /* for sources that don't support ZIP_SOURCE_TELL. */
+    void *user_stream;
+};
+
+typedef struct zip_stream zip_stream_t;
+
 struct zip_source {
     zip_source_t *src;
     union {
@@ -398,11 +411,18 @@ struct zip_source {
     bool eof;                /* EOF reached */
     bool had_read_error;     /* a previous ZIP_SOURCE_READ reported an error */
     zip_uint64_t bytes_read; /* for sources that don't support ZIP_SOURCE_TELL. */
+    zip_stream_t **streams;        /* open stream data, source specific */
+    zip_uint64_t nstreams;
+    zip_uint64_t nstreams_alloced;
+    zip_uint64_t *free_stream_ids; /* free stream IDs to take */
+    zip_uint64_t nfree_stream_ids;
+    zip_uint64_t nfree_stream_ids_alloced;
 };
 
 #define ZIP_SOURCE_IS_OPEN_READING(src) ((src)->open_count > 0)
 #define ZIP_SOURCE_IS_OPEN_WRITING(src) ((src)->write_state == ZIP_SOURCE_WRITE_OPEN)
 #define ZIP_SOURCE_IS_LAYERED(src) ((src)->src != NULL)
+#define ZIP_SOURCE_IS_VALID_STREAM_ID(src, stream_id) (stream_id >= 0 && stream_id < src->nstreams && src->streams[stream_id] != NULL)
 
 /* entry in zip archive directory */
 
@@ -493,6 +513,7 @@ typedef struct _zip_pkware_keys zip_pkware_keys_t;
 
 
 zip_int64_t _zip_add_entry(zip_t *);
+int _zip_realloc(void **inout_memory, zip_uint64_t *inout_alloced, zip_uint64_t element_size, zip_uint64_t additional_elements);
 
 zip_uint8_t *_zip_buffer_data(zip_buffer_t *buffer);
 bool _zip_buffer_eof(zip_buffer_t *buffer);
@@ -601,7 +622,7 @@ int _zip_register_source(zip_t *za, zip_source_t *src);
 void _zip_set_open_error(int *zep, const zip_error_t *err, int ze);
 
 bool zip_source_accept_empty(zip_source_t *src);
-zip_int64_t _zip_source_call(zip_source_t *src, void *data, zip_uint64_t length, zip_source_cmd_t command);
+zip_int64_t _zip_source_call(zip_source_t *src, zip_int64_t stream_id, void *data, zip_uint64_t length, zip_source_cmd_t command);
 bool _zip_source_eof(zip_source_t *);
 zip_source_t *_zip_source_file_or_p(const char *, FILE *, zip_uint64_t, zip_int64_t, const zip_stat_t *, zip_error_t *error);
 bool _zip_source_had_error(zip_source_t *);
@@ -610,6 +631,11 @@ zip_source_t *_zip_source_new(zip_error_t *error);
 int _zip_source_set_source_archive(zip_source_t *, zip_t *);
 zip_source_t *_zip_source_window_new(zip_source_t *src, zip_uint64_t start, zip_int64_t length, zip_stat_t *st, zip_file_attributes_t *attributes, zip_t *source_archive, zip_uint64_t source_index, zip_error_t *error);
 zip_source_t *_zip_source_zip_new(zip_t *, zip_uint64_t, zip_flags_t, zip_uint64_t, zip_uint64_t, const char *, zip_error_t *error);
+zip_int64_t _zip_source_read(zip_source_t *_Nonnull, zip_int64_t, void *_Nonnull, zip_uint64_t);
+int _zip_source_seek(zip_source_t *_Nonnull, zip_int64_t, zip_int64_t, int);
+zip_int64_t _zip_source_tell(zip_source_t *_Nonnull, zip_int64_t);
+zip_int64_t _zip_source_close(zip_source_t *_Nonnull, zip_int64_t);
+
 
 int _zip_stat_merge(zip_stat_t *dst, const zip_stat_t *src, zip_error_t *error);
 int _zip_string_equal(const zip_string_t *a, const zip_string_t *b);

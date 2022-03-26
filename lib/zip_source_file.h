@@ -38,9 +38,15 @@ struct zip_source_file_stat {
     bool regular_file; /* must always be valid */
 };
 
+typedef struct zip_source_file_stream zip_source_file_stream_t;
 typedef struct zip_source_file_context zip_source_file_context_t;
 typedef struct zip_source_file_operations zip_source_file_operations_t;
 typedef struct zip_source_file_stat zip_source_file_stat_t;
+
+struct zip_source_file_stream {
+    void *f;             /* file to read from */
+    zip_uint64_t offset; /* current offset relative to start (0 is beginning of part we read) */
+};
 
 struct zip_source_file_context {
     zip_error_t error; /* last error information */
@@ -48,13 +54,12 @@ struct zip_source_file_context {
 
     /* reading */
     char *fname;                      /* name of file to read from */
-    void *f;                          /* file to read from */
     zip_stat_t st;                    /* stat information passed in */
     zip_file_attributes_t attributes; /* additional file attributes */
     zip_error_t stat_error;           /* error returned for stat */
     zip_uint64_t start;               /* start offset of data to read */
     zip_uint64_t len;                 /* length of the file, 0 for up to EOF */
-    zip_uint64_t offset;              /* current offset relative to start (0 is beginning of part we read) */
+    zip_source_file_stream_t stream;
 
     /* writing */
     char *tmpname;
@@ -72,12 +77,12 @@ struct zip_source_file_context {
    - create_temp_output_cloning is always optional. */
 
 struct zip_source_file_operations {
-    void (*close)(zip_source_file_context_t *ctx);
+    void (*close)(zip_source_file_context_t *ctx, void *f);
     zip_int64_t (*commit_write)(zip_source_file_context_t *ctx);
     zip_int64_t (*create_temp_output)(zip_source_file_context_t *ctx);
     zip_int64_t (*create_temp_output_cloning)(zip_source_file_context_t *ctx, zip_uint64_t len);
-    bool (*open)(zip_source_file_context_t *ctx);
-    zip_int64_t (*read)(zip_source_file_context_t *ctx, void *buf, zip_uint64_t len);
+    void* (*open)(zip_source_file_context_t *ctx);
+    zip_int64_t (*read)(zip_source_file_context_t *ctx, void *buf, zip_uint64_t len, void *f);
     zip_int64_t (*remove)(zip_source_file_context_t *ctx);
     void (*rollback_write)(zip_source_file_context_t *ctx);
     bool (*seek)(zip_source_file_context_t *ctx, void *f, zip_int64_t offset, int whence);

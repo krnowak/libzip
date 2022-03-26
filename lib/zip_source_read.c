@@ -34,6 +34,73 @@
 
 #include "zipint.h"
 
+zip_int64_t
+_zip_source_read(zip_source_t *src, zip_int64_t stream_id, void *data, zip_uint64_t len) {
+  if (stream_id < 0)
+    return zip_source_read(src, data, len);
+
+  return zip_source_read_stream(src, stream_id, data, len);
+}
+
+ZIP_EXTERN zip_int64_t
+zip_source_read_stream(zip_source_t *src, zip_int64_t stream_id, void *data, zip_uint64_t len) {
+    zip_stream_t *stream;
+    zip_uint64_t bytes_read;
+    zip_int64_t n;
+    zip_source_args_stream_t args;
+
+    if (src->source_closed) {
+        return -1;
+    }
+    if (!ZIP_SOURCE_IS_VALID_STREAM_ID(src, stream_id) || len > ZIP_INT64_MAX || (len > 0 && data == NULL)) {
+        zip_error_set(&src->error, ZIP_ER_INVAL, 0);
+        return -1;
+    }
+    stream = src->streams[stream_id];
+
+    if (stream->had_read_error) {
+        return -1;
+    }
+
+    if (stream->eof) {
+        return 0;
+    }
+
+    if (len == 0) {
+        return 0;
+    }
+
+    bytes_read = 0;
+    args.user_stream = stream->user_stream;
+    args.data = data;
+    args.len = len;
+    while (bytes_read < len) {
+        args.data = (zip_uint8_t *)data + bytes_read;
+        args.len = len - bytes_read;
+        if ((n = _zip_source_call(src, stream->parent_stream_id, &args, sizeof(args), ZIP_SOURCE_READ_STREAM)) < 0) {
+            stream->had_read_error = true;
+            if (bytes_read == 0) {
+                return -1;
+            }
+            break;
+        }
+
+        if (n == 0) {
+            stream->eof = 1;
+            break;
+        }
+
+        bytes_read += (zip_uint64_t)n;
+    }
+
+    if (stream->bytes_read + bytes_read < stream->bytes_read) {
+        stream->bytes_read = ZIP_UINT64_MAX;
+    }
+    else {
+        stream->bytes_read += bytes_read;
+    }
+    return (zip_int64_t)bytes_read;
+}
 
 zip_int64_t
 zip_source_read(zip_source_t *src, void *data, zip_uint64_t len) {
@@ -62,7 +129,7 @@ zip_source_read(zip_source_t *src, void *data, zip_uint64_t len) {
 
     bytes_read = 0;
     while (bytes_read < len) {
-        if ((n = _zip_source_call(src, (zip_uint8_t *)data + bytes_read, len - bytes_read, ZIP_SOURCE_READ)) < 0) {
+        if ((n = _zip_source_call(src, -1, (zip_uint8_t *)data + bytes_read, len - bytes_read, ZIP_SOURCE_READ)) < 0) {
             src->had_read_error = true;
             if (bytes_read == 0) {
                 return -1;

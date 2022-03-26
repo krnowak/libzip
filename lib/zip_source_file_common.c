@@ -40,6 +40,11 @@
 #include "zip_source_file.h"
 
 static zip_int64_t read_file(void *state, void *data, zip_uint64_t len, zip_source_cmd_t cmd);
+static zip_int64_t read_file_open(zip_source_file_context_t *ctx, zip_source_file_stream_t *stream);
+static zip_int64_t read_file_read(zip_source_file_context_t *ctx, zip_source_file_stream_t *stream, void* data, zip_uint64_t len);
+static zip_int64_t read_file_close(zip_source_file_context_t *ctx, zip_source_file_stream_t *stream);
+static zip_int64_t read_file_seek(zip_source_file_context_t *ctx, zip_source_file_stream_t *stream, void* data, zip_uint64_t len);
+static zip_int64_t read_file_tell(zip_source_file_stream_t *stream);
 
 static void
 zip_source_file_stat_init(zip_source_file_stat_t *st) {
@@ -105,7 +110,7 @@ zip_source_file_common_new(const char *fname, void *file, zip_uint64_t start, zi
             return NULL;
         }
     }
-    ctx->f = file;
+    ctx->stream.f = file;
     ctx->start = start;
     ctx->len = (zip_uint64_t)len;
     if (st) {
@@ -189,6 +194,12 @@ zip_source_file_common_new(const char *fname, void *file, zip_uint64_t start, zi
             ctx->supports |= ZIP_SOURCE_MAKE_COMMAND_BITMASK(ZIP_SOURCE_BEGIN_WRITE_CLONING);
         }
     }
+    if (ops->open) {
+        ctx->supports |= ZIP_SOURCE_SUPPORTS_READABLE_STREAMS;
+        if ((ctx->supports & ZIP_SOURCE_SUPPORTS_SEEKABLE) == ZIP_SOURCE_SUPPORTS_SEEKABLE) {
+            ctx->supports |= ZIP_SOURCE_SUPPORTS_SEEKABLE_STREAMS;
+        }
+    }
 
     if ((zs = zip_source_function_create(read_file, ctx, error)) == NULL) {
         free(ctx->fname);
@@ -203,10 +214,8 @@ zip_source_file_common_new(const char *fname, void *file, zip_uint64_t start, zi
 static zip_int64_t
 read_file(void *state, void *data, zip_uint64_t len, zip_source_cmd_t cmd) {
     zip_source_file_context_t *ctx;
-    char *buf;
 
     ctx = (zip_source_file_context_t *)state;
-    buf = (char *)data;
 
     switch (cmd) {
     case ZIP_SOURCE_ACCEPT_EMPTY:
@@ -229,11 +238,7 @@ read_file(void *state, void *data, zip_uint64_t len, zip_source_cmd_t cmd) {
         return ctx->ops->create_temp_output_cloning(ctx, len);
 
     case ZIP_SOURCE_CLOSE:
-        if (ctx->fname) {
-            ctx->ops->close(ctx);
-            ctx->f = NULL;
-        }
-        return 0;
+        return read_file_close(ctx, &ctx->stream);
 
     case ZIP_SOURCE_COMMIT_WRITE: {
         zip_int64_t ret = ctx->ops->commit_write(ctx);
@@ -251,8 +256,8 @@ read_file(void *state, void *data, zip_uint64_t len, zip_source_cmd_t cmd) {
     case ZIP_SOURCE_FREE:
         free(ctx->fname);
         free(ctx->tmpname);
-        if (ctx->f) {
-            ctx->ops->close(ctx);
+        if (ctx->stream.f) {
+            ctx->ops->close(ctx, ctx->stream.f);
         }
         free(ctx);
         return 0;
@@ -266,40 +271,10 @@ read_file(void *state, void *data, zip_uint64_t len, zip_source_cmd_t cmd) {
         return sizeof(ctx->attributes);
 
     case ZIP_SOURCE_OPEN:
-        if (ctx->fname) {
-            if (ctx->ops->open(ctx) == false) {
-                return -1;
-            }
-        }
+        return read_file_open(ctx, &ctx->stream);
 
-        if (ctx->start > 0) { // TODO: rewind on re-open
-            if (ctx->ops->seek(ctx, ctx->f, (zip_int64_t)ctx->start, SEEK_SET) == false) {
-                /* TODO: skip by reading */
-                return -1;
-            }
-        }
-        ctx->offset = 0;
-        return 0;
-
-    case ZIP_SOURCE_READ: {
-        zip_int64_t i;
-        zip_uint64_t n;
-
-        if (ctx->len > 0) {
-            n = ZIP_MIN(ctx->len - ctx->offset, len);
-        }
-        else {
-            n = len;
-        }
-
-        if ((i = ctx->ops->read(ctx, buf, n)) < 0) {
-            zip_error_set(&ctx->error, ZIP_ER_READ, errno);
-            return -1;
-        }
-        ctx->offset += (zip_uint64_t)i;
-
-        return i;
-    }
+    case ZIP_SOURCE_READ:
+        return read_file_read(ctx, &ctx->stream, data, len);
 
     case ZIP_SOURCE_REMOVE:
         return ctx->ops->remove(ctx);
@@ -311,26 +286,8 @@ read_file(void *state, void *data, zip_uint64_t len, zip_source_cmd_t cmd) {
         ctx->tmpname = NULL;
         return 0;
 
-    case ZIP_SOURCE_SEEK: {
-        zip_int64_t new_offset = zip_source_seek_compute_offset(ctx->offset, ctx->len, data, len, &ctx->error);
-
-        if (new_offset < 0) {
-            return -1;
-        }
-
-        /* The actual offset inside the file must be representable as zip_int64_t. */
-        if (new_offset > ZIP_INT64_MAX - (zip_int64_t)ctx->start) {
-            zip_error_set(&ctx->error, ZIP_ER_SEEK, EOVERFLOW);
-            return -1;
-        }
-
-        ctx->offset = (zip_uint64_t)new_offset;
-
-        if (ctx->ops->seek(ctx, ctx->f, (zip_int64_t)(ctx->offset + ctx->start), SEEK_SET) == false) {
-            return -1;
-        }
-        return 0;
-    }
+    case ZIP_SOURCE_SEEK:
+        return read_file_seek(ctx, &ctx->stream, data, len);
 
     case ZIP_SOURCE_SEEK_WRITE: {
         zip_source_args_seek_t *args;
@@ -363,7 +320,7 @@ read_file(void *state, void *data, zip_uint64_t len, zip_source_cmd_t cmd) {
         return ctx->supports;
 
     case ZIP_SOURCE_TELL:
-        return (zip_int64_t)ctx->offset;
+        return read_file_tell(&ctx->stream);
 
     case ZIP_SOURCE_TELL_WRITE:
         return ctx->ops->tell(ctx, ctx->fout);
@@ -371,8 +328,159 @@ read_file(void *state, void *data, zip_uint64_t len, zip_source_cmd_t cmd) {
     case ZIP_SOURCE_WRITE:
         return ctx->ops->write(ctx, data, len);
 
+    case ZIP_SOURCE_OPEN_STREAM: {
+        zip_source_args_stream_t *args;
+        zip_source_file_stream_t *stream;
+
+        args = ZIP_SOURCE_GET_ARGS(zip_source_args_stream_t, data, len, &ctx->error);
+        if (args == NULL)
+            return -1;
+
+        stream = (zip_source_file_stream_t *)malloc(sizeof(*stream));
+        if (!stream) {
+            zip_error_set(&ctx->error, ZIP_ER_MEMORY, 0);
+            return -1;
+        }
+        if (read_file_open(ctx, stream) < 0) {
+            free(stream);
+            return -1;
+        }
+        args->user_stream = stream;
+        return 0;
+    }
+
+    case ZIP_SOURCE_CLOSE_STREAM: {
+        zip_source_args_stream_t *args;
+        zip_int64_t result;
+
+        args = ZIP_SOURCE_GET_ARGS(zip_source_args_stream_t, data, len, &ctx->error);
+        if (args == NULL)
+            return -1;
+
+        result = read_file_close(ctx, args->user_stream);
+        free(args->user_stream);
+        return result;
+    }
+
+    case ZIP_SOURCE_READ_STREAM: {
+        zip_source_args_stream_t *args;
+        zip_source_file_stream_t *stream;
+
+        args = ZIP_SOURCE_GET_ARGS(zip_source_args_stream_t, data, len, &ctx->error);
+        if (args == NULL)
+            return -1;
+
+        stream = (zip_source_file_stream_t *)args->user_stream;
+
+        return read_file_read(ctx, stream, data, len);
+    }
+
+    case ZIP_SOURCE_SEEK_STREAM: {
+        zip_source_args_stream_t *args;
+        zip_source_file_stream_t *stream;
+
+        args = ZIP_SOURCE_GET_ARGS(zip_source_args_stream_t, data, len, &ctx->error);
+        if (args == NULL)
+            return -1;
+
+        stream = (zip_source_file_stream_t *)args->user_stream;
+
+        return read_file_seek(ctx, stream, args->data, args->len);
+    }
+
+    case ZIP_SOURCE_TELL_STREAM: {
+        zip_source_args_stream_t *args;
+        zip_source_file_stream_t *stream;
+
+        args = ZIP_SOURCE_GET_ARGS(zip_source_args_stream_t, data, len, &ctx->error);
+        if (args == NULL)
+            return -1;
+
+        stream = (zip_source_file_stream_t *)args->user_stream;
+        return read_file_tell(stream);
+    }
+
     default:
         zip_error_set(&ctx->error, ZIP_ER_OPNOTSUPP, 0);
         return -1;
     }
+}
+
+
+static zip_int64_t read_file_open(zip_source_file_context_t *ctx, zip_source_file_stream_t *stream) {
+    void *f = NULL;
+
+    if (ctx->fname) {
+        if ((f = ctx->ops->open(ctx)) == NULL) {
+            return -1;
+        }
+    }
+
+    if (ctx->start > 0) { // TODO: rewind on re-open
+        if (ctx->ops->seek(ctx, f, (zip_int64_t)ctx->start, SEEK_SET) == false) {
+            /* TODO: skip by reading */
+            return -1;
+        }
+    }
+    if (ctx->fname)
+        stream->f = f;
+    stream->offset = 0;
+    return 0;
+}
+
+
+static zip_int64_t read_file_read(zip_source_file_context_t *ctx, zip_source_file_stream_t *stream, void* data, zip_uint64_t len) {
+    zip_int64_t i;
+    zip_uint64_t n;
+
+    if (ctx->len > 0) {
+        n = ZIP_MIN(ctx->len - stream->offset, len);
+    }
+    else {
+        n = len;
+    }
+
+    if ((i = ctx->ops->read(ctx, data, n, stream->f)) < 0) {
+        zip_error_set(&ctx->error, ZIP_ER_READ, errno);
+        return -1;
+    }
+    stream->offset += (zip_uint64_t)i;
+
+    return i;
+}
+
+
+static zip_int64_t read_file_close(zip_source_file_context_t *ctx, zip_source_file_stream_t *stream) {
+    if (ctx->fname) {
+        ctx->ops->close(ctx, stream->f);
+        stream->f = NULL;
+    }
+    return 0;
+}
+
+
+static zip_int64_t read_file_seek(zip_source_file_context_t *ctx, zip_source_file_stream_t *stream, void* data, zip_uint64_t len) {
+    zip_int64_t new_offset = zip_source_seek_compute_offset(stream->offset, ctx->len, data, len, &ctx->error);
+
+    if (new_offset < 0) {
+        return -1;
+    }
+
+    /* The actual offset inside the file must be representable as zip_int64_t. */
+    if (new_offset > ZIP_INT64_MAX - (zip_int64_t)ctx->start) {
+        zip_error_set(&ctx->error, ZIP_ER_SEEK, EOVERFLOW);
+        return -1;
+    }
+
+    stream->offset = (zip_uint64_t)new_offset;
+
+    if (ctx->ops->seek(ctx, stream->f, (zip_int64_t)(stream->offset + ctx->start), SEEK_SET) == false) {
+        return -1;
+    }
+    return 0;
+}
+
+
+static zip_int64_t read_file_tell(zip_source_file_stream_t *stream) {
+    return (zip_int64_t)stream->offset;
 }

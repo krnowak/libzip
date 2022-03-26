@@ -46,11 +46,12 @@ zip_source_remove(zip_source_t *src) {
             return -1;
         }
     }
+    /* TODO: close streams */
     if (src->write_state != ZIP_SOURCE_WRITE_CLOSED) {
         zip_source_rollback_write(src);
     }
 
-    if (_zip_source_call(src, NULL, 0, ZIP_SOURCE_REMOVE) < 0) {
+    if (_zip_source_call(src, -1, NULL, 0, ZIP_SOURCE_REMOVE) < 0) {
         return -1;
     }
 

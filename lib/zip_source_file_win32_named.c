@@ -35,7 +35,7 @@
 
 static zip_int64_t _zip_win32_named_op_commit_write(zip_source_file_context_t *ctx);
 static zip_int64_t _zip_win32_named_op_create_temp_output(zip_source_file_context_t *ctx);
-static bool _zip_win32_named_op_open(zip_source_file_context_t *ctx);
+static void *_zip_win32_named_op_open(zip_source_file_context_t *ctx);
 static zip_int64_t _zip_win32_named_op_remove(zip_source_file_context_t *ctx);
 static void _zip_win32_named_op_rollback_write(zip_source_file_context_t *ctx);
 static bool _zip_win32_named_op_stat(zip_source_file_context_t *ctx, zip_source_file_stat_t *st);
@@ -109,9 +109,9 @@ _zip_win32_named_op_create_temp_output(zip_source_file_context_t *ctx) {
     char *tempname = NULL;
     size_t tempname_size = 0;
 
-    if ((HANDLE)ctx->f != INVALID_HANDLE_VALUE && GetFileType((HANDLE)ctx->f) == FILE_TYPE_DISK) {
+    if ((HANDLE)ctx->stream.f != INVALID_HANDLE_VALUE && GetFileType((HANDLE)ctx->stream.f) == FILE_TYPE_DISK) {
         si = DACL_SECURITY_INFORMATION | UNPROTECTED_DACL_SECURITY_INFORMATION;
-        success = GetSecurityInfo((HANDLE)ctx->f, SE_FILE_OBJECT, si, NULL, NULL, &dacl, NULL, &psd);
+        success = GetSecurityInfo((HANDLE)ctx->stream.f, SE_FILE_OBJECT, si, NULL, NULL, &dacl, NULL, &psd);
         if (success == ERROR_SUCCESS) {
             sa.nLength = sizeof(SECURITY_ATTRIBUTES);
             sa.bInheritHandle = FALSE;
@@ -154,16 +154,15 @@ _zip_win32_named_op_create_temp_output(zip_source_file_context_t *ctx) {
 }
 
 
-static bool
+static void *
 _zip_win32_named_op_open(zip_source_file_context_t *ctx) {
     HANDLE h = win32_named_open(ctx, ctx->fname, false, NULL);
 
     if (h == INVALID_HANDLE_VALUE) {
-        return false;
+        return NULL;
     }
 
-    ctx->f = h;
-    return true;
+    return h;
 }
 
 

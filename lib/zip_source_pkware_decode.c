@@ -45,7 +45,7 @@ struct trad_pkware {
 
 
 static int decrypt_header(zip_source_t *, struct trad_pkware *);
-static zip_int64_t pkware_decrypt(zip_source_t *, void *, void *, zip_uint64_t, zip_source_cmd_t);
+static zip_int64_t pkware_decrypt(zip_source_t *, zip_int64_t, void *, void *, zip_uint64_t, zip_source_cmd_t);
 static struct trad_pkware *trad_pkware_new(const char *password, zip_error_t *error);
 static void trad_pkware_free(struct trad_pkware *);
 
@@ -130,7 +130,7 @@ decrypt_header(zip_source_t *src, struct trad_pkware *ctx) {
 
 
 static zip_int64_t
-pkware_decrypt(zip_source_t *src, void *ud, void *data, zip_uint64_t len, zip_source_cmd_t cmd) {
+pkware_decrypt(zip_source_t *src, zip_int64_t stream_id, void *ud, void *data, zip_uint64_t len, zip_source_cmd_t cmd) {
     struct trad_pkware *ctx;
     zip_int64_t n;
 

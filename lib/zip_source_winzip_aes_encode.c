@@ -53,7 +53,7 @@ struct winzip_aes {
 
 static int encrypt_header(zip_source_t *src, struct winzip_aes *ctx);
 static void winzip_aes_free(struct winzip_aes *);
-static zip_int64_t winzip_aes_encrypt(zip_source_t *src, void *ud, void *data, zip_uint64_t len, zip_source_cmd_t cmd);
+static zip_int64_t winzip_aes_encrypt(zip_source_t *src, zip_int64_t stream_id, void *ud, void *data, zip_uint64_t len, zip_source_cmd_t cmd);
 static struct winzip_aes *winzip_aes_new(zip_uint16_t encryption_method, const char *password, zip_error_t *error);
 
 
@@ -104,7 +104,7 @@ encrypt_header(zip_source_t *src, struct winzip_aes *ctx) {
 
 
 static zip_int64_t
-winzip_aes_encrypt(zip_source_t *src, void *ud, void *data, zip_uint64_t length, zip_source_cmd_t cmd) {
+winzip_aes_encrypt(zip_source_t *src, zip_int64_t stream_id, void *ud, void *data, zip_uint64_t length, zip_source_cmd_t cmd) {
     struct winzip_aes *ctx;
     zip_int64_t ret;
     zip_uint64_t buffer_n;

@@ -79,17 +79,17 @@ zip_source_win32handle_create(HANDLE h, zip_uint64_t start, zip_int64_t length, 
 
 
 void
-_zip_win32_op_close(zip_source_file_context_t *ctx) {
-    CloseHandle((HANDLE)ctx->f);
+_zip_win32_op_close(zip_source_file_context_t *ctx, void *f) {
+    CloseHandle((HANDLE)f);
 }
 
 
 zip_int64_t
-_zip_win32_op_read(zip_source_file_context_t *ctx, void *buf, zip_uint64_t len) {
+_zip_win32_op_read(zip_source_file_context_t *ctx, void *buf, zip_uint64_t len, void *f) {
     DWORD i;
 
     /* TODO: cap len to "DWORD_MAX" */
-    if (!ReadFile((HANDLE)ctx->f, buf, (DWORD)len, &i, NULL)) {
+    if (!ReadFile((HANDLE)f, buf, (DWORD)len, &i, NULL)) {
         zip_error_set(&ctx->error, ZIP_ER_READ, _zip_win32_error_to_errno(GetLastError()));
         return -1;
     }
@@ -130,7 +130,7 @@ _zip_win32_op_seek(zip_source_file_context_t *ctx, void *f, zip_int64_t offset, 
 
 static bool
 _zip_win32_op_stat(zip_source_file_context_t *ctx, zip_source_file_stat_t *st) {
-    return _zip_stat_win32(ctx, st, (HANDLE)ctx->f);
+    return _zip_stat_win32(ctx, st, (HANDLE)ctx->stream.f);
 }
 
 

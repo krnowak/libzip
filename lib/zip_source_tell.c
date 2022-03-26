@@ -35,6 +35,44 @@
 #include "zipint.h"
 
 
+zip_int64_t
+_zip_source_tell(zip_source_t *src, zip_int64_t stream_id) {
+  if (stream_id < 0)
+    return zip_source_tell(src);
+
+  return zip_source_tell_stream(src, stream_id);
+}
+
+ZIP_EXTERN zip_int64_t
+zip_source_tell_stream(zip_source_t *src, zip_int64_t stream_id) {
+    zip_stream_t* stream;
+    zip_source_args_stream_t args;
+
+    if (src->source_closed) {
+        return -1;
+    }
+    if (!ZIP_SOURCE_IS_VALID_STREAM_ID(src, stream_id)) {
+        zip_error_set(&src->error, ZIP_ER_INVAL, 0);
+        return -1;
+    }
+
+    stream = src->streams[stream_id];
+    if (!zip_source_supports_multi_open_seekable(src)) {
+        if (stream->bytes_read > ZIP_INT64_MAX) {
+            zip_error_set(&src->error, ZIP_ER_TELL, EOVERFLOW);
+            return -1;
+        }
+        return (zip_int64_t)stream->bytes_read;
+    }
+
+    args.user_stream = stream->user_stream;
+    args.data = NULL;
+    args.len = 0;
+
+    return _zip_source_call(src, stream->parent_stream_id, &args, sizeof(args), ZIP_SOURCE_TELL_STREAM);
+}
+
+
 ZIP_EXTERN zip_int64_t
 zip_source_tell(zip_source_t *src) {
     if (src->source_closed) {
@@ -53,5 +91,5 @@ zip_source_tell(zip_source_t *src) {
         return (zip_int64_t)src->bytes_read;
     }
 
-    return _zip_source_call(src, NULL, 0, ZIP_SOURCE_TELL);
+    return _zip_source_call(src, -1, NULL, 0, ZIP_SOURCE_TELL);
 }

@@ -61,7 +61,7 @@ static zip_int64_t _zip_stdio_op_create_temp_output(zip_source_file_context_t *c
 #ifdef CAN_CLONE
 static zip_int64_t _zip_stdio_op_create_temp_output_cloning(zip_source_file_context_t *ctx, zip_uint64_t offset);
 #endif
-static bool _zip_stdio_op_open(zip_source_file_context_t *ctx);
+static void *_zip_stdio_op_open(zip_source_file_context_t *ctx);
 static zip_int64_t _zip_stdio_op_remove(zip_source_file_context_t *ctx);
 static void _zip_stdio_op_rollback_write(zip_source_file_context_t *ctx);
 static char *_zip_stdio_op_strdup(zip_source_file_context_t *ctx, const char *string);
@@ -179,7 +179,7 @@ _zip_stdio_op_create_temp_output_cloning(zip_source_file_context_t *ctx, zip_uin
         struct file_clone_range range;
         struct stat st;
         
-        if (fstat(fileno(ctx->f), &st) < 0) {
+        if (fstat(fileno(ctx->stream.f), &st) < 0) {
             zip_error_set(&ctx->error, ZIP_ER_TMPOPEN, errno);
             return -1;
         }
@@ -188,7 +188,7 @@ _zip_stdio_op_create_temp_output_cloning(zip_source_file_context_t *ctx, zip_uin
             return -1;
         }
             
-        range.src_fd = fileno(ctx->f);
+        range.src_fd = fileno(ctx->stream.f);
         range.src_offset = 0;
         range.src_length = ((offset + st.st_blksize - 1) / st.st_blksize) * st.st_blksize;
         if (range.src_length > st.st_size) {
@@ -237,13 +237,14 @@ _zip_stdio_op_create_temp_output_cloning(zip_source_file_context_t *ctx, zip_uin
 }
 #endif
 
-static bool
+static void *
 _zip_stdio_op_open(zip_source_file_context_t *ctx) {
-    if ((ctx->f = _zip_fopen_close_on_exec(ctx->fname, false)) == NULL) {
+    void *f;
+    if ((f = _zip_fopen_close_on_exec(ctx->fname, false)) == NULL) {
         zip_error_set(&ctx->error, ZIP_ER_OPEN, errno);
-        return false;
+        return NULL;
     }
-    return true;
+    return f;
 }
 
 

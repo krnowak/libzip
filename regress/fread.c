@@ -49,9 +49,10 @@ const char *when_name[] = {"no", "zip_fopen", "zip_fread", "zip_fclose"};
 static int do_read(zip_t *z, const char *name, zip_flags_t flags, enum when when_ex, int ze_ex, int se_ex);
 
 int verbose;
+int inject_independent;
 
 const char *progname;
-#define USAGE "usage: %s [-v] archive\n"
+#define USAGE "usage: %s [-vi] archive\n"
 
 int
 main(int argc, char *argv[]) {
@@ -67,10 +68,14 @@ main(int argc, char *argv[]) {
 
     progname = argv[0];
 
-    while ((c = getopt(argc, argv, "v")) != -1) {
+    while ((c = getopt(argc, argv, "vi")) != -1) {
         switch (c) {
         case 'v':
             verbose = 1;
+            break;
+
+        case 'i':
+            inject_independent = 1;
             break;
 
         default:
@@ -178,6 +183,9 @@ do_read(zip_t *z, const char *name, zip_flags_t flags, enum when when_ex, int ze
     zip_error_init(&error_got);
     zip_error_init(&error_ex);
     zip_error_set(&error_ex, ze_ex, se_ex);
+
+    if (inject_independent)
+        flags |= ZIP_FL_INDEPENDENT;
 
     if ((zf = zip_fopen(z, name, flags)) == NULL) {
         when_got = WHEN_OPEN;

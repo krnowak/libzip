@@ -47,5 +47,5 @@ zip_source_seek_write(zip_source_t *src, zip_int64_t offset, int whence) {
     args.offset = offset;
     args.whence = whence;
 
-    return (_zip_source_call(src, &args, sizeof(args), ZIP_SOURCE_SEEK_WRITE) < 0 ? -1 : 0);
+    return (_zip_source_call(src, -1, &args, sizeof(args), ZIP_SOURCE_SEEK_WRITE) < 0 ? -1 : 0);
 }

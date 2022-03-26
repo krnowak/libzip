@@ -58,12 +58,20 @@ zip_source_layered_create(zip_source_t *src, zip_source_layered_callback cb, voi
     zs->cb.l = cb;
     zs->ud = ud;
 
-    zs->supports = cb(src, ud, NULL, 0, ZIP_SOURCE_SUPPORTS);
+    zs->supports = cb(src, -1, ud, NULL, 0, ZIP_SOURCE_SUPPORTS);
     if (zs->supports < 0) {
         zs->supports = ZIP_SOURCE_SUPPORTS_READABLE;
     }
     if (!zip_source_supports_reopen(src)) {
         zs->supports &= ~ZIP_SOURCE_MAKE_COMMAND_BITMASK(ZIP_SOURCE_SUPPORTS_REOPEN);
+    }
+    if (!zip_source_supports_multi_open_seekable(src)) {
+        zs->supports &= ~(ZIP_SOURCE_MAKE_COMMAND_BITMASK(ZIP_SOURCE_SEEK_STREAM)
+                          | ZIP_SOURCE_MAKE_COMMAND_BITMASK(ZIP_SOURCE_TELL_STREAM));
+        if (!zip_source_supports_multi_open_readable(src))
+            zs->supports &= ~(ZIP_SOURCE_MAKE_COMMAND_BITMASK(ZIP_SOURCE_OPEN_STREAM)
+                              | ZIP_SOURCE_MAKE_COMMAND_BITMASK(ZIP_SOURCE_READ_STREAM)
+                              | ZIP_SOURCE_MAKE_COMMAND_BITMASK(ZIP_SOURCE_CLOSE_STREAM));
     }
 
     return zs;

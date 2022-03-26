@@ -88,6 +88,7 @@ extern "C" {
 #define ZIP_FL_ENC_UTF_8 2048u /* string is UTF-8 encoded */
 #define ZIP_FL_ENC_CP437 4096u /* string is CP437 encoded */
 #define ZIP_FL_OVERWRITE 8192u /* zip_file_add: if file with name exists, overwrite (replace) it */
+#define ZIP_FL_INDEPENDENT 16384u /* zip_fopen: open the independent stream insource */
 
 /* archive global flags flags */
 
@@ -237,7 +238,12 @@ enum zip_source_cmd {
     ZIP_SOURCE_BEGIN_WRITE_CLONING, /* like ZIP_SOURCE_BEGIN_WRITE, but keep part of original file */
     ZIP_SOURCE_ACCEPT_EMPTY,        /* whether empty files are valid archives */
     ZIP_SOURCE_GET_FILE_ATTRIBUTES, /* get additional file attributes */
-    ZIP_SOURCE_SUPPORTS_REOPEN      /* allow reading from changed entry */
+    ZIP_SOURCE_SUPPORTS_REOPEN,     /* allow reading from changed entry */
+    ZIP_SOURCE_OPEN_STREAM,  /* opening the source will create independent stream */
+    ZIP_SOURCE_CLOSE_STREAM,
+    ZIP_SOURCE_READ_STREAM,
+    ZIP_SOURCE_SEEK_STREAM,
+    ZIP_SOURCE_TELL_STREAM
 };
 typedef enum zip_source_cmd zip_source_cmd_t;
 
@@ -266,6 +272,18 @@ typedef enum zip_source_cmd zip_source_cmd_t;
                                          | ZIP_SOURCE_MAKE_COMMAND_BITMASK(ZIP_SOURCE_TELL_WRITE) \
                                          | ZIP_SOURCE_MAKE_COMMAND_BITMASK(ZIP_SOURCE_REMOVE))
 
+#define ZIP_SOURCE_SUPPORTS_READABLE_STREAMS (ZIP_SOURCE_MAKE_COMMAND_BITMASK(ZIP_SOURCE_OPEN_STREAM) \
+                                         | ZIP_SOURCE_MAKE_COMMAND_BITMASK(ZIP_SOURCE_READ_STREAM) \
+                                         | ZIP_SOURCE_MAKE_COMMAND_BITMASK(ZIP_SOURCE_CLOSE_STREAM) \
+                                         | ZIP_SOURCE_MAKE_COMMAND_BITMASK(ZIP_SOURCE_STAT) \
+                                         | ZIP_SOURCE_MAKE_COMMAND_BITMASK(ZIP_SOURCE_ERROR) \
+                                         | ZIP_SOURCE_MAKE_COMMAND_BITMASK(ZIP_SOURCE_FREE) \
+                                         | ZIP_SOURCE_MAKE_COMMAND_BITMASK(ZIP_SOURCE_SUPPORTS))
+
+#define ZIP_SOURCE_SUPPORTS_SEEKABLE_STREAMS (ZIP_SOURCE_SUPPORTS_READABLE_STREAMS \
+                                         | ZIP_SOURCE_MAKE_COMMAND_BITMASK(ZIP_SOURCE_SEEK_STREAM) \
+                                         | ZIP_SOURCE_MAKE_COMMAND_BITMASK(ZIP_SOURCE_TELL_STREAM))
+
 /* clang-format on */
 
 /* for use by sources */
@@ -275,6 +293,15 @@ struct zip_source_args_seek {
 };
 
 typedef struct zip_source_args_seek zip_source_args_seek_t;
+
+struct zip_source_args_stream {
+    void *user_stream;
+    void *data;
+    zip_uint64_t len;
+};
+
+typedef struct zip_source_args_stream zip_source_args_stream_t;
+
 #define ZIP_SOURCE_GET_ARGS(type, data, len, error) ((len) < sizeof(type) ? zip_error_set((error), ZIP_ER_INVAL, 0), (type *)NULL : (type *)(data))
 
 
@@ -435,6 +462,7 @@ ZIP_EXTERN zip_source_t *_Nullable zip_source_buffer_create(const void *_Nullabl
 ZIP_EXTERN zip_source_t *_Nullable zip_source_buffer_fragment(zip_t *_Nonnull, const zip_buffer_fragment_t *_Nonnull, zip_uint64_t, int);
 ZIP_EXTERN zip_source_t *_Nullable zip_source_buffer_fragment_create(const zip_buffer_fragment_t *_Nullable, zip_uint64_t, int, zip_error_t *_Nullable);
 ZIP_EXTERN int zip_source_close(zip_source_t *_Nonnull);
+ZIP_EXTERN int zip_source_close_stream(zip_source_t *_Nonnull, zip_int64_t);
 ZIP_EXTERN int zip_source_commit_write(zip_source_t *_Nonnull);
 ZIP_EXTERN zip_error_t *_Nonnull zip_source_error(zip_source_t *_Nonnull);
 ZIP_EXTERN zip_source_t *_Nullable zip_source_file(zip_t *_Nonnull, const char *_Nonnull, zip_uint64_t, zip_int64_t);
@@ -449,13 +477,17 @@ ZIP_EXTERN int zip_source_is_deleted(zip_source_t *_Nonnull);
 ZIP_EXTERN void zip_source_keep(zip_source_t *_Nonnull);
 ZIP_EXTERN zip_int64_t zip_source_make_command_bitmap(zip_source_cmd_t, ...);
 ZIP_EXTERN int zip_source_open(zip_source_t *_Nonnull);
+ZIP_EXTERN zip_int64_t zip_source_open_stream(zip_source_t *_Nonnull);
 ZIP_EXTERN zip_int64_t zip_source_read(zip_source_t *_Nonnull, void *_Nonnull, zip_uint64_t);
+ZIP_EXTERN zip_int64_t zip_source_read_stream(zip_source_t *_Nonnull, zip_int64_t, void *_Nonnull, zip_uint64_t);
 ZIP_EXTERN void zip_source_rollback_write(zip_source_t *_Nonnull);
 ZIP_EXTERN int zip_source_seek(zip_source_t *_Nonnull, zip_int64_t, int);
+ZIP_EXTERN int zip_source_seek_stream(zip_source_t *_Nonnull, zip_int64_t, zip_int64_t, int);
 ZIP_EXTERN zip_int64_t zip_source_seek_compute_offset(zip_uint64_t, zip_uint64_t, void *_Nonnull, zip_uint64_t, zip_error_t *_Nullable);
 ZIP_EXTERN int zip_source_seek_write(zip_source_t *_Nonnull, zip_int64_t, int);
 ZIP_EXTERN int zip_source_stat(zip_source_t *_Nonnull, zip_stat_t *_Nonnull);
 ZIP_EXTERN zip_int64_t zip_source_tell(zip_source_t *_Nonnull);
+ZIP_EXTERN zip_int64_t zip_source_tell_stream(zip_source_t *_Nonnull, zip_int64_t);
 ZIP_EXTERN zip_int64_t zip_source_tell_write(zip_source_t *_Nonnull);
 #ifdef _WIN32
 ZIP_EXTERN zip_source_t *zip_source_win32a(zip_t *, const char *, zip_uint64_t, zip_int64_t);

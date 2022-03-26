@@ -42,7 +42,7 @@ zip_source_begin_write(zip_source_t *src) {
         return -1;
     }
 
-    if (_zip_source_call(src, NULL, 0, ZIP_SOURCE_BEGIN_WRITE) < 0) {
+    if (_zip_source_call(src, -1, NULL, 0, ZIP_SOURCE_BEGIN_WRITE) < 0) {
         return -1;
     }
 

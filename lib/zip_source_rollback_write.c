@@ -41,6 +41,6 @@ zip_source_rollback_write(zip_source_t *src) {
         return;
     }
 
-    _zip_source_call(src, NULL, 0, ZIP_SOURCE_ROLLBACK_WRITE);
+    _zip_source_call(src, -1, NULL, 0, ZIP_SOURCE_ROLLBACK_WRITE);
     src->write_state = ZIP_SOURCE_WRITE_CLOSED;
 }

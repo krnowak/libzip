@@ -47,6 +47,16 @@ zip_source_supports_reopen(zip_source_t *src) {
     return (zip_source_supports(src) & ZIP_SOURCE_MAKE_COMMAND_BITMASK(ZIP_SOURCE_SUPPORTS_REOPEN)) != 0;
 }
 
+bool
+zip_source_supports_multi_open_readable(zip_source_t *src) {
+    return (zip_source_supports(src) & ZIP_SOURCE_SUPPORTS_READABLE_STREAMS) == ZIP_SOURCE_SUPPORTS_READABLE_STREAMS;
+}
+
+bool
+zip_source_supports_multi_open_seekable(zip_source_t *src) {
+    return (zip_source_supports(src) & ZIP_SOURCE_SUPPORTS_SEEKABLE_STREAMS) == ZIP_SOURCE_SUPPORTS_SEEKABLE_STREAMS;
+}
+
 ZIP_EXTERN zip_int64_t
 zip_source_make_command_bitmap(zip_source_cmd_t cmd0, ...) {
     zip_int64_t bitmap;

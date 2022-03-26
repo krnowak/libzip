@@ -88,20 +88,20 @@ zip_source_filep_create(FILE *file, zip_uint64_t start, zip_int64_t length, zip_
 
 
 void
-_zip_stdio_op_close(zip_source_file_context_t *ctx) {
-    fclose((FILE *)ctx->f);
+_zip_stdio_op_close(zip_source_file_context_t *ctx, void *f) {
+    fclose((FILE *)f);
 }
 
 
 zip_int64_t
-_zip_stdio_op_read(zip_source_file_context_t *ctx, void *buf, zip_uint64_t len) {
+_zip_stdio_op_read(zip_source_file_context_t *ctx, void *buf, zip_uint64_t len, void *f) {
     size_t i;
     if (len > SIZE_MAX) {
         len = SIZE_MAX;
     }
 
-    if ((i = fread(buf, 1, (size_t)len, ctx->f)) == 0) {
-        if (ferror((FILE *)ctx->f)) {
+    if ((i = fread(buf, 1, (size_t)len, f)) == 0) {
+        if (ferror((FILE *)f)) {
             zip_error_set(&ctx->error, ZIP_ER_READ, errno);
             return -1;
         }
@@ -138,7 +138,7 @@ _zip_stdio_op_stat(zip_source_file_context_t *ctx, zip_source_file_stat_t *st) {
         ret = stat(ctx->fname, &sb);
     }
     else {
-        ret = fstat(fileno((FILE *)ctx->f), &sb);
+        ret = fstat(fileno((FILE *)ctx->stream.f), &sb);
     }
 
     if (ret < 0) {

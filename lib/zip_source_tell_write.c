@@ -42,5 +42,5 @@ zip_source_tell_write(zip_source_t *src) {
         return -1;
     }
 
-    return _zip_source_call(src, NULL, 0, ZIP_SOURCE_TELL_WRITE);
+    return _zip_source_call(src, -1, NULL, 0, ZIP_SOURCE_TELL_WRITE);
 }

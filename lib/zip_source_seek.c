@@ -35,6 +35,44 @@
 #include "zipint.h"
 
 
+int
+_zip_source_seek(zip_source_t *src, zip_int64_t stream_id, zip_int64_t offset, int whence) {
+  if (stream_id < 0)
+      return zip_source_seek(src, offset, whence);
+
+  return zip_source_seek_stream(src, stream_id, offset, whence);
+}
+
+ZIP_EXTERN int
+zip_source_seek_stream(zip_source_t *src, zip_int64_t stream_id, zip_int64_t offset, int whence) {
+    zip_stream_t *stream;
+    zip_source_args_seek_t args_seek;
+    zip_source_args_stream_t args_stream;
+
+    if (src->source_closed) {
+        return -1;
+    }
+    if (!ZIP_SOURCE_IS_VALID_STREAM_ID(src, stream_id) || (whence != SEEK_SET && whence != SEEK_CUR && whence != SEEK_END)) {
+        zip_error_set(&src->error, ZIP_ER_INVAL, 0);
+        return -1;
+    }
+
+    stream = src->streams[stream_id];
+    args_seek.offset = offset;
+    args_seek.whence = whence;
+    args_stream.user_stream = stream->user_stream;
+    args_stream.data = &args_seek;
+    args_stream.len = sizeof(args_seek);
+
+    if (_zip_source_call(src, stream->parent_stream_id, &args_stream, sizeof(args_stream), ZIP_SOURCE_SEEK_STREAM) < 0) {
+        return -1;
+    }
+
+    src->eof = 0;
+    return 0;
+}
+
+
 ZIP_EXTERN int
 zip_source_seek(zip_source_t *src, zip_int64_t offset, int whence) {
     zip_source_args_seek_t args;
@@ -50,7 +88,7 @@ zip_source_seek(zip_source_t *src, zip_int64_t offset, int whence) {
     args.offset = offset;
     args.whence = whence;
 
-    if (_zip_source_call(src, &args, sizeof(args), ZIP_SOURCE_SEEK) < 0) {
+    if (_zip_source_call(src, -1, &args, sizeof(args), ZIP_SOURCE_SEEK) < 0) {
         return -1;
     }
 
